@@ -1,6 +1,7 @@
 /* GStreamer
  * Copyright (C) 2021 Allied Vision Technologies GmbH
- *
+ * Copyright (C) 2022 CAF Signalling SLU
+ * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
  * License version 2.0 as published by the Free Software Foundation.
@@ -73,6 +74,7 @@ enum
     PROP_SETTINGS_FILENAME,
     PROP_EXPOSURETIME,
     PROP_EXPOSUREAUTO,
+    PROP_EXPOSUREAUTOMAX, //CAFSIG
     PROP_BALANCEWHITEAUTO,
     PROP_GAIN,
     PROP_OFFSETX,
@@ -354,6 +356,21 @@ static void gst_vimbasrc_class_init(GstVimbaSrcClass *klass)
             GST_ENUM_EXPOSUREAUTO_MODES,
             GST_VIMBASRC_AUTOFEATURE_OFF,
             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+//CAFSIG
+   g_object_class_install_property(
+        gobject_class,
+        PROP_EXPOSUREAUTOMAX,
+        g_param_spec_double(
+            "exposureautomax",
+            "ExposureAuto max time",
+            "Install an upper limit for autoexposure, can lead to darker images",
+            0.,
+            G_MAXDOUBLE,
+            0.,
+            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+//!CAFSIG
+
     g_object_class_install_property(
         gobject_class,
         PROP_BALANCEWHITEAUTO,
@@ -542,6 +559,15 @@ static void gst_vimbasrc_init(GstVimbaSrc *vimbasrc)
             g_object_class_find_property(
                 gobject_class,
                 "exposureauto")));
+
+   //CAFSIG
+    vimbasrc->properties.exposureautomax = g_value_get_double(
+        g_param_spec_get_default_value(
+            g_object_class_find_property(
+                gobject_class,
+                "exposureautomax")));
+   //!CAFSIG
+
     vimbasrc->properties.balancewhiteauto = g_value_get_enum(
         g_param_spec_get_default_value(
             g_object_class_find_property(
@@ -627,6 +653,13 @@ void gst_vimbasrc_set_property(GObject *object, guint property_id, const GValue 
     case PROP_EXPOSUREAUTO:
         vimbasrc->properties.exposureauto = g_value_get_enum(value);
         break;
+
+    //CAFSIG
+    case PROP_EXPOSUREAUTOMAX:
+        vimbasrc->properties.exposureautomax = g_value_get_double(value);
+        break;
+    //!CAFSIG
+
     case PROP_BALANCEWHITEAUTO:
         vimbasrc->properties.balancewhiteauto = g_value_get_enum(value);
         break;
@@ -747,6 +780,30 @@ void gst_vimbasrc_get_property(GObject *object, guint property_id, GValue *value
         }
         g_value_set_enum(value, vimbasrc->properties.exposureauto);
         break;
+    
+    //CAFSIG
+    case PROP_EXPOSUREAUTOMAX:
+        // TODO: Workaround for cameras with legacy "ExposureTimeAbs" feature should be replaced with a general legacy
+        // feature name handling approach: See similar TODO above
+
+        result = VmbFeatureFloatGet(vimbasrc->camera.handle, "ExposureAutoMax", &vmbfeature_value_double);
+        if (result == VmbErrorSuccess)
+        {
+            GST_DEBUG_OBJECT(vimbasrc,
+                             "Camera returned the following value for \"ExposureAutoMax\": %f",
+                             vmbfeature_value_double);
+            vimbasrc->properties.exposureautomax = vmbfeature_value_double;
+        }
+        else
+        {
+            GST_WARNING_OBJECT(vimbasrc,
+                               "Failed to read value of \"ExposureAutoMax\" from camera. Return code was: %s",
+                               ErrorCodeToMessage(result));
+        }
+        g_value_set_double(value, vimbasrc->properties.exposureautomax);
+        break;
+    //!CAFSIG
+
     case PROP_BALANCEWHITEAUTO:
         result = VmbFeatureEnumGet(vimbasrc->camera.handle, "BalanceWhiteAuto", &vmbfeature_value_char);
         if (result == VmbErrorSuccess)

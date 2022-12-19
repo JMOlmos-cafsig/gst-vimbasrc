@@ -1,6 +1,7 @@
 /* GStreamer
  * Copyright (C) 2021 Allied Vision Technologies GmbH
- *
+ * Copyright (C) 2022 CAF Signalling SLU
+ * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
  * License version 2.0 as published by the Free Software Foundation.
@@ -162,6 +163,7 @@ struct _GstVimbaSrc
         char *settings_file_path;
         double exposuretime;
         int exposureauto;
+        float exposureautomax;//CAFSIG
         int balancewhiteauto;
         double gain;
         int offsetx;
