@@ -163,9 +163,16 @@ struct _GstVimbaSrc
         char *settings_file_path;
         double exposuretime;
         int exposureauto;
-        float exposureautomax;//CAFSIG
+        double exposureautomax;//CAFSIG
+        double exposureautomin;//CAFSIG
         int balancewhiteauto;
         double gain;
+        int gainauto;//CAFSIG
+        double gainautomax;//CAFSIG
+        double gainautomin;//CAFSIG
+        double gamma;//CAFSIG
+        bool flipx;//CAFSIG
+        bool flipy;//CAFSIG
         int offsetx;
         int offsety;
         int width;

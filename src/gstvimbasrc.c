@@ -75,8 +75,15 @@ enum
     PROP_EXPOSURETIME,
     PROP_EXPOSUREAUTO,
     PROP_EXPOSUREAUTOMAX, //CAFSIG
+    PROP_EXPOSUREAUTOMIN, //CAFSIG
     PROP_BALANCEWHITEAUTO,
     PROP_GAIN,
+    PROP_GAINAUTO,//CAFSIG
+    PROP_GAINAUTOMAX,//CAFSIG
+    PROP_GAINAUTOMIN,//CAFSIG
+    PROP_GAMMA,//CAFSIG
+    PROP_FLIPX, //CAFSIG
+    PROP_FLIPY, //CAFSIG
     PROP_OFFSETX,
     PROP_OFFSETY,
     PROP_WIDTH,
@@ -114,6 +121,28 @@ static GType gst_vimbasrc_exposureauto_get_type(void)
     }
     return vimbasrc_exposureauto_type;
 }
+
+
+//CAFSIG
+/* Auto gain modes */
+#define GST_ENUM_GAINAUTO_MODES (gst_vimbasrc_gainauto_get_type())
+static GType gst_vimbasrc_gainauto_get_type(void)
+{
+    static GType vimbasrc_gainauto_type = 0;
+    static const GEnumValue gainauto_modes[] = {
+        /* The "nick" (last entry) will be used to pass the setting value on to the Vimba FeatureEnum */
+        {GST_VIMBASRC_AUTOFEATURE_OFF, "Gain db amount is usercontrolled using Gain", "Off"},
+        {GST_VIMBASRC_AUTOFEATURE_ONCE, "Gain db amount is adapted once by the device. Once it has converged, it returns to the Offstate", "Once"},
+        {GST_VIMBASRC_AUTOFEATURE_CONTINUOUS, "Gain db is constantly adapted by the device to maximize the dynamic range based on the autofunction profile", "Continuous"},
+        {0, NULL, NULL}};
+    if (!vimbasrc_gainauto_type)
+    {
+        vimbasrc_gainauto_type =
+            g_enum_register_static("GstVimbasrcGainAutoModes", gainauto_modes);
+    }
+    return vimbasrc_gainauto_type;
+}
+//!CAFSIG
 
 /* Auto white balance modes */
 #define GST_ENUM_BALANCEWHITEAUTO_MODES (gst_vimbasrc_balancewhiteauto_get_type())
@@ -358,7 +387,7 @@ static void gst_vimbasrc_class_init(GstVimbaSrcClass *klass)
             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
 //CAFSIG
-   g_object_class_install_property(
+    g_object_class_install_property(
         gobject_class,
         PROP_EXPOSUREAUTOMAX,
         g_param_spec_double(
@@ -366,7 +395,18 @@ static void gst_vimbasrc_class_init(GstVimbaSrcClass *klass)
             "ExposureAuto max time",
             "Install an upper limit for autoexposure, can lead to darker images",
             0.,
-            G_MAXDOUBLE,
+            9.9e6,
+            9.9e6,
+            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(
+        gobject_class,
+        PROP_EXPOSUREAUTOMIN,
+        g_param_spec_double(
+            "exposureautomin",
+            "ExposureAuto min time",
+            "Install a lower limit for autoexposure, can lead to saturated images",
+            0.,
+            9.9e6,
             0.,
             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 //!CAFSIG
@@ -392,6 +432,71 @@ static void gst_vimbasrc_class_init(GstVimbaSrcClass *klass)
             G_MAXDOUBLE,
             0.,
             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+//CAFSIG
+    g_object_class_install_property(
+        gobject_class,
+        PROP_GAINAUTO,
+        g_param_spec_enum(
+            "gainauto",
+            "Gain Auto feature setting",
+            "Sets the auto gain mode. The output of the auto gain function affects the whole image",
+            GST_ENUM_GAINAUTO_MODES,
+            GST_VIMBASRC_AUTOFEATURE_OFF,
+            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(
+        gobject_class,
+        PROP_GAINAUTOMAX,
+        g_param_spec_double(
+            "gainautomax",
+            "Gain Auto max time",
+            "Install an upper limit for autogain, can lead to darker images",
+            0.,
+            47.9,
+            25.0,
+            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(
+        gobject_class,
+        PROP_GAINAUTOMIN,
+        g_param_spec_double(
+            "gainautomin",
+            "Gain Auto min time",
+            "Install a lower limit for autogain, can lead to noisy images",
+            0.,
+            47.9,
+            0.,
+            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(
+        gobject_class,
+        PROP_GAMMA,
+        g_param_spec_double(
+            "gamma",
+            "Gamma level",
+            "Change overall gamma luminance",
+            0.4,
+            2.4,
+            0.6,
+            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(
+        gobject_class,
+        PROP_FLIPX,
+        g_param_spec_boolean(
+            "flipx",
+            "Reverse X dimension",
+            "Flips image left to right",
+            false,
+            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(
+        gobject_class,
+        PROP_FLIPY,
+        g_param_spec_boolean(
+            "flipy",
+            "Reverse Y dimension",
+            "Flips image top to bottom",
+            false,
+            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+//!CAFSIG
+
     g_object_class_install_property(
         gobject_class,
         PROP_OFFSETX,
@@ -566,6 +671,11 @@ static void gst_vimbasrc_init(GstVimbaSrc *vimbasrc)
             g_object_class_find_property(
                 gobject_class,
                 "exposureautomax")));
+    vimbasrc->properties.exposureautomin = g_value_get_double(
+        g_param_spec_get_default_value(
+            g_object_class_find_property(
+                gobject_class,
+                "exposureautomin")));
    //!CAFSIG
 
     vimbasrc->properties.balancewhiteauto = g_value_get_enum(
@@ -578,6 +688,41 @@ static void gst_vimbasrc_init(GstVimbaSrc *vimbasrc)
             g_object_class_find_property(
                 gobject_class,
                 "gain")));
+
+   //CAFSIG
+    vimbasrc->properties.gainauto = g_value_get_enum(
+        g_param_spec_get_default_value(
+            g_object_class_find_property(
+                gobject_class,
+                "gainauto")));
+    vimbasrc->properties.gainautomax = g_value_get_double(
+        g_param_spec_get_default_value(
+            g_object_class_find_property(
+                gobject_class,
+                "gainautomax")));
+    vimbasrc->properties.gainautomin = g_value_get_double(
+        g_param_spec_get_default_value(
+            g_object_class_find_property(
+                gobject_class,
+                "gainautomin")));
+    vimbasrc->properties.gamma = g_value_get_double(
+        g_param_spec_get_default_value(
+            g_object_class_find_property(
+                gobject_class,
+                "gamma")));
+    vimbasrc->properties.flipx = g_value_get_boolean(
+        g_param_spec_get_default_value(
+            g_object_class_find_property(
+                gobject_class,
+                "flipx")));
+    vimbasrc->properties.flipy = g_value_get_boolean(
+        g_param_spec_get_default_value(
+            g_object_class_find_property(
+                gobject_class,
+                "flipy")));
+   //!CAFSIG
+
+
     vimbasrc->properties.offsetx = g_value_get_int(
         g_param_spec_get_default_value(
             g_object_class_find_property(
@@ -658,6 +803,9 @@ void gst_vimbasrc_set_property(GObject *object, guint property_id, const GValue 
     case PROP_EXPOSUREAUTOMAX:
         vimbasrc->properties.exposureautomax = g_value_get_double(value);
         break;
+    case PROP_EXPOSUREAUTOMIN:
+        vimbasrc->properties.exposureautomin = g_value_get_double(value);
+        break;
     //!CAFSIG
 
     case PROP_BALANCEWHITEAUTO:
@@ -666,6 +814,28 @@ void gst_vimbasrc_set_property(GObject *object, guint property_id, const GValue 
     case PROP_GAIN:
         vimbasrc->properties.gain = g_value_get_double(value);
         break;
+
+    //CAFSIG
+    case PROP_GAINAUTO:
+        vimbasrc->properties.gainauto = g_value_get_enum(value);
+        break;
+    case PROP_GAINAUTOMAX:
+        vimbasrc->properties.gainautomax = g_value_get_double(value);
+        break;
+    case PROP_GAINAUTOMIN:
+        vimbasrc->properties.gainautomin = g_value_get_double(value);
+        break;
+    case PROP_GAMMA:
+        vimbasrc->properties.gamma = g_value_get_double(value);
+        break;
+    case PROP_FLIPX:
+        vimbasrc->properties.flipx = g_value_get_boolean(value);
+        break;
+    case PROP_FLIPY:
+        vimbasrc->properties.flipy = g_value_get_boolean(value);
+        break;
+    //!CAFSIG
+
     case PROP_OFFSETX:
         vimbasrc->properties.offsetx = g_value_get_int(value);
         break;
@@ -707,6 +877,7 @@ void gst_vimbasrc_get_property(GObject *object, guint property_id, GValue *value
 
     const char *vmbfeature_value_char;
     double vmbfeature_value_double;
+    VmbBool_t vmbfeature_value_boolean;
     VmbInt64_t vmbfeature_value_int64;
 
     GST_TRACE_OBJECT(vimbasrc, "get_property");
@@ -802,6 +973,26 @@ void gst_vimbasrc_get_property(GObject *object, guint property_id, GValue *value
         }
         g_value_set_double(value, vimbasrc->properties.exposureautomax);
         break;
+    case PROP_EXPOSUREAUTOMIN:
+        // TODO: Workaround for cameras with legacy "ExposureTimeAbs" feature should be replaced with a general legacy
+        // feature name handling approach: See similar TODO above
+
+        result = VmbFeatureFloatGet(vimbasrc->camera.handle, "ExposureAutoMin", &vmbfeature_value_double);
+        if (result == VmbErrorSuccess)
+        {
+            GST_DEBUG_OBJECT(vimbasrc,
+                             "Camera returned the following value for \"ExposureAutoMin\": %f",
+                             vmbfeature_value_double);
+            vimbasrc->properties.exposureautomin = vmbfeature_value_double;
+        }
+        else
+        {
+            GST_WARNING_OBJECT(vimbasrc,
+                               "Failed to read value of \"ExposureAutoMin\" from camera. Return code was: %s",
+                               ErrorCodeToMessage(result));
+        }
+        g_value_set_double(value, vimbasrc->properties.exposureautomin);
+        break;
     //!CAFSIG
 
     case PROP_BALANCEWHITEAUTO:
@@ -841,6 +1032,117 @@ void gst_vimbasrc_get_property(GObject *object, guint property_id, GValue *value
         }
         g_value_set_double(value, vimbasrc->properties.gain);
         break;
+   
+   //CAFSIG
+    case PROP_GAINAUTO:
+        result = VmbFeatureEnumGet(vimbasrc->camera.handle, "GainAuto", &vmbfeature_value_char);
+        if (result == VmbErrorSuccess)
+        {
+            GST_DEBUG_OBJECT(vimbasrc,
+                             "Camera returned the following value for \"GainAuto\": %s",
+                             vmbfeature_value_char);
+            vimbasrc->properties.gainauto = g_enum_get_value_by_nick(
+                                                    g_type_class_ref(GST_ENUM_GAINAUTO_MODES),
+                                                    vmbfeature_value_char)
+                                                    ->value;
+        }
+        else
+        {
+            GST_WARNING_OBJECT(vimbasrc,
+                               "Failed to read value of \"GainAuto\" from camera. Return code was: %s",
+                               ErrorCodeToMessage(result));
+        }
+        g_value_set_enum(value, vimbasrc->properties.gainauto);
+        break;
+    case PROP_GAINAUTOMAX:
+        result = VmbFeatureFloatGet(vimbasrc->camera.handle, "GainAutoMax", &vmbfeature_value_double);
+        if (result == VmbErrorSuccess)
+        {
+            GST_DEBUG_OBJECT(vimbasrc,
+                             "Camera returned the following value for \"GainAutoMax\": %f",
+                             vmbfeature_value_double);
+            vimbasrc->properties.gainautomax = vmbfeature_value_double;
+        }
+        else
+        {
+            GST_WARNING_OBJECT(vimbasrc,
+                               "Failed to read value of \"GainAutoMax\" from camera. Return code was: %s",
+                               ErrorCodeToMessage(result));
+        }
+        g_value_set_double(value, vimbasrc->properties.gainautomax);
+        break;
+    case PROP_GAINAUTOMIN:
+        result = VmbFeatureFloatGet(vimbasrc->camera.handle, "Gain", &vmbfeature_value_double);
+        if (result == VmbErrorSuccess)
+        {
+            GST_DEBUG_OBJECT(vimbasrc,
+                             "Camera returned the following value for \"GainAutoMin\": %f",
+                             vmbfeature_value_double);
+            vimbasrc->properties.gainautomin = vmbfeature_value_double;
+        }
+        else
+        {
+            GST_WARNING_OBJECT(vimbasrc,
+                               "Failed to read value of \"GainAutoMin\" from camera. Return code was: %s",
+                               ErrorCodeToMessage(result));
+        }
+        g_value_set_double(value, vimbasrc->properties.gainautomin);
+        break;
+    case PROP_GAMMA:
+        result = VmbFeatureFloatGet(vimbasrc->camera.handle, "Gamma", &vmbfeature_value_double);
+        if (result == VmbErrorSuccess)
+        {
+            GST_DEBUG_OBJECT(vimbasrc,
+                             "Camera returned the following value for \"Gamma\": %f",
+                             vmbfeature_value_double);
+            vimbasrc->properties.gainautomin = vmbfeature_value_double;
+        }
+        else
+        {
+            GST_WARNING_OBJECT(vimbasrc,
+                               "Failed to read value of \"Gamma\" from camera. Return code was: %s",
+                               ErrorCodeToMessage(result));
+        }
+        g_value_set_double(value, vimbasrc->properties.gamma);
+        break;
+    case PROP_FLIPX:
+        result = VmbFeatureBoolGet(vimbasrc->camera.handle, "ReverseX", &vmbfeature_value_boolean);
+        if (result == VmbErrorSuccess)
+        {
+            GST_DEBUG_OBJECT(vimbasrc,
+                             "Camera returned the following value for \"ReverseX\": %d",
+                             (int)vmbfeature_value_boolean);
+            vimbasrc->properties.flipx = vmbfeature_value_boolean;
+        }
+        else
+        {
+            GST_WARNING_OBJECT(vimbasrc,
+                               "Failed to read value of \"ReverseX\" from camera. Return code was: %s",
+                               ErrorCodeToMessage(result));
+        }
+        g_value_set_boolean(value, vimbasrc->properties.flipx);
+        break;
+    case PROP_FLIPY:
+        result = VmbFeatureBoolGet(vimbasrc->camera.handle, "ReverseY", &vmbfeature_value_boolean);
+        if (result == VmbErrorSuccess)
+        {
+            GST_DEBUG_OBJECT(vimbasrc,
+                             "Camera returned the following value for \"ReverseY\": %d",
+                             (int)vmbfeature_value_boolean);
+            vimbasrc->properties.flipy = vmbfeature_value_boolean;
+        }
+        else
+        {
+            GST_WARNING_OBJECT(vimbasrc,
+                               "Failed to read value of \"ReverseY\" from camera. Return code was: %s",
+                               ErrorCodeToMessage(result));
+        }
+        g_value_set_boolean(value, vimbasrc->properties.flipy);
+        break;
+   
+   //!CAFSIG
+
+
     case PROP_OFFSETX:
         result = VmbFeatureIntGet(vimbasrc->camera.handle, "OffsetX", &vmbfeature_value_int64);
         if (result == VmbErrorSuccess)
