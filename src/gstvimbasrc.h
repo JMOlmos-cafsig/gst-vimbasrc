@@ -182,6 +182,8 @@ struct _GstVimbaSrc
         int triggersource;
         int triggeractivation;
         int incomplete_frame_handling;
+        bool is_connected; //CAFSIG
+        int status_code; //CAFSIG
     } properties;
 
     VmbFrame_t frame_buffers[NUM_VIMBA_FRAMES];

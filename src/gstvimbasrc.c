@@ -45,6 +45,7 @@
 #include <glib.h>
 
 #include <VimbaC/Include/VimbaC.h>
+#include "vimba_code_to_property.h"
 
 // Counter variable to keep track of calls to VmbStartup() and VmbShutdown()
 static unsigned int vmb_open_count = 0;
@@ -92,7 +93,9 @@ enum
     PROP_TRIGGERMODE,
     PROP_TRIGGERSOURCE,
     PROP_TRIGGERACTIVATION,
-    PROP_INCOMPLETE_FRAME_HANDLING
+    PROP_INCOMPLETE_FRAME_HANDLING,
+    PROP_IS_CONNECTED, //CAFSIG
+    PROP_STATUS_CODE //CAFSIG
 };
 
 /* pad templates */
@@ -591,6 +594,29 @@ static void gst_vimbasrc_class_init(GstVimbaSrcClass *klass)
             GST_ENUM_INCOMPLETEFRAMEHANDLING_VALUES,
             GST_VIMBASRC_INCOMPLETE_FRAME_HANDLING_DROP,
             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+   //CAFSIG
+    g_object_class_install_property(
+        gobject_class,
+        PROP_IS_CONNECTED,
+        g_param_spec_boolean(
+            "is-connected",
+            "Camera is connected",
+            "Returns false if camera is not connected or vimba is missing",
+            0,
+            G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(
+        gobject_class,
+        PROP_STATUS_CODE,
+        g_param_spec_int(
+            "status-code",
+            "Status of the src",
+            "0 : not initialised \n1: OK \n2: Vimba instalation error\n3: Driver not found",
+            0,
+            GST_VIMBA_SRC_STATUS_CODE_UNKNOWN,
+            0,
+            G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+   //!CAFSIG
 }
 
 static void gst_vimbasrc_init(GstVimbaSrc *vimbasrc)
@@ -598,15 +624,29 @@ static void gst_vimbasrc_init(GstVimbaSrc *vimbasrc)
     GST_TRACE_OBJECT(vimbasrc, "init");
     GST_INFO_OBJECT(vimbasrc, "gst-vimbasrc version %s", VERSION);
     VmbError_t result = VmbErrorSuccess;
+    GstVimbaSrcStatusCode code;
     // Start the Vimba API
     G_LOCK(vmb_open_count);
     if (0 == vmb_open_count++)
     {
         result = VmbStartup();
         GST_DEBUG_OBJECT(vimbasrc, "VmbStartup returned: %s", ErrorCodeToMessage(result));
+
+        //CAFSIG
+        //Redirect error to status-code property
+        code=vimba_code_to_property(result);
+        vimbasrc->properties.status_code=code;
+        //!CAFSIG
+
         if (result != VmbErrorSuccess)
         {
             GST_ERROR_OBJECT(vimbasrc, "Vimba initialization failed");
+
+            //CAFSIG
+            vimbasrc->properties.is_connected=0;
+            vimbasrc->camera.is_connected=0;
+            //!CAFSIG
+
         }
     }
     else
@@ -629,6 +669,8 @@ static void gst_vimbasrc_init(GstVimbaSrc *vimbasrc)
     else
     {
         GST_WARNING_OBJECT(vimbasrc, "VmbVersionQuery failed with Reason: %s", ErrorCodeToMessage(result));
+        code=vimba_code_to_property(result);
+
     }
 
     if (DiscoverGigECameras((GObject *)vimbasrc) == VmbBoolFalse)
@@ -768,6 +810,8 @@ static void gst_vimbasrc_init(GstVimbaSrc *vimbasrc)
             g_object_class_find_property(
                 gobject_class,
                 "incompleteframehandling")));
+   
+   
 }
 
 void gst_vimbasrc_set_property(GObject *object, guint property_id, const GValue *value, GParamSpec *pspec)
@@ -1138,8 +1182,7 @@ void gst_vimbasrc_get_property(GObject *object, guint property_id, GValue *value
                                ErrorCodeToMessage(result));
         }
         g_value_set_boolean(value, vimbasrc->properties.flipy);
-        break;
-   
+        break;    
    //!CAFSIG
 
 
@@ -1294,6 +1337,16 @@ void gst_vimbasrc_get_property(GObject *object, guint property_id, GValue *value
     case PROP_INCOMPLETE_FRAME_HANDLING:
         g_value_set_enum(value, vimbasrc->properties.incomplete_frame_handling);
         break;
+
+    //CAFSIG
+    case PROP_IS_CONNECTED:
+        g_value_set_boolean(value,(vimbasrc->properties.is_connected | vimbasrc->camera.is_connected));
+        break;
+    case PROP_STATUS_CODE:
+        g_value_set_int(value,(vimbasrc->properties.status_code));
+        break;
+    //!CAFSIG
+
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
         break;
@@ -1323,6 +1376,7 @@ void gst_vimbasrc_finalize(GObject *object)
         if (result == VmbErrorSuccess)
         {
             GST_INFO_OBJECT(vimbasrc, "Closed camera %s", vimbasrc->camera.id);
+            
         }
         else
         {
@@ -1332,6 +1386,8 @@ void gst_vimbasrc_finalize(GObject *object)
                              ErrorCodeToMessage(result));
         }
         vimbasrc->camera.is_connected = false;
+        vimbasrc->properties.is_connected=false;
+        vimbasrc->properties.status_code=GST_VIMBA_SRC_STATUS_CODE_NOT_INITIALISED;
     }
 
     G_LOCK(vmb_open_count);
@@ -1528,7 +1584,11 @@ static gboolean gst_vimbasrc_start(GstBaseSrc *src)
         if (result != VmbErrorSuccess)
         {
             // Can't connect to camera. Abort execution by returning FALSE. This stops the pipeline!
+            vimbasrc->properties.status_code=vimba_code_to_property(result);
             return FALSE;
+        }
+        else{
+            vimbasrc->properties.is_connected=true;
         }
     }
 
@@ -1811,6 +1871,84 @@ VmbError_t apply_feature_settings(GstVimbaSrc *vimbasrc)
                            ErrorCodeToMessage(result));
     }
 
+    //CAFSIG
+    // exposure max min values //TODO, non blocking features, set them without stopping
+    GST_DEBUG_OBJECT(vimbasrc, "Setting \"ExposureAutoMax\" to %f", vimbasrc->properties.exposureautomax);
+    result = VmbFeatureFloatSet(vimbasrc->camera.handle, "ExposureAutoMax", vimbasrc->properties.exposureautomax);
+    if (result == VmbErrorSuccess)
+    {
+        GST_DEBUG_OBJECT(vimbasrc, "Setting was changed successfully");
+    }
+    else
+    {
+        GST_WARNING_OBJECT(vimbasrc,
+                           "Failed to set \"ExposureAutoMax\" to %f. Return code was: %s",
+                           vimbasrc->properties.exposureautomax,
+                           ErrorCodeToMessage(result));
+    }
+    GST_DEBUG_OBJECT(vimbasrc, "Setting \"ExposureAutoMin\" to %f", vimbasrc->properties.exposureautomin);
+    result = VmbFeatureFloatSet(vimbasrc->camera.handle, "ExposureAutoMin", vimbasrc->properties.exposureautomin);
+    if (result == VmbErrorSuccess)
+    {
+        GST_DEBUG_OBJECT(vimbasrc, "Setting was changed successfully");
+    }
+    else
+    {
+        GST_WARNING_OBJECT(vimbasrc,
+                           "Failed to set \"ExposureAutoMin\" to %f. Return code was: %s",
+                           vimbasrc->properties.exposureautomin,
+                           ErrorCodeToMessage(result));
+    }
+
+
+    //Gamma
+    GST_DEBUG_OBJECT(vimbasrc, "Setting \"Gamma\" to %f", vimbasrc->properties.gamma);
+    result = VmbFeatureFloatSet(vimbasrc->camera.handle, "Gamma", vimbasrc->properties.gamma);
+    if (result == VmbErrorSuccess)
+    {
+        GST_DEBUG_OBJECT(vimbasrc, "Setting was changed successfully");
+    }
+    else
+    {
+        GST_WARNING_OBJECT(vimbasrc,
+                           "Failed to set \"Gamma\" to %f. Return code was: %s",
+                           vimbasrc->properties.gamma,
+                           ErrorCodeToMessage(result));
+    }
+
+    //FlipX
+    GST_DEBUG_OBJECT(vimbasrc, "Setting \"FlipX\" to %d", vimbasrc->properties.flipx);
+    result = VmbFeatureBoolSet(vimbasrc->camera.handle, "ReverseX", vimbasrc->properties.flipx);
+    if (result == VmbErrorSuccess)
+    {
+        GST_DEBUG_OBJECT(vimbasrc, "Setting was changed successfully");
+    }
+    else
+    {
+        GST_WARNING_OBJECT(vimbasrc,
+                           "Failed to set \"FlipX\" to %d. Return code was: %s",
+                           vimbasrc->properties.flipx,
+                           ErrorCodeToMessage(result));
+    }
+
+   //FlipY
+    GST_DEBUG_OBJECT(vimbasrc, "Setting \"FlipY\" to %d", vimbasrc->properties.flipy);
+    result = VmbFeatureBoolSet(vimbasrc->camera.handle, "ReverseY", vimbasrc->properties.flipy);
+    if (result == VmbErrorSuccess)
+    {
+        GST_DEBUG_OBJECT(vimbasrc, "Setting was changed successfully");
+    }
+    else
+    {
+        GST_WARNING_OBJECT(vimbasrc,
+                           "Failed to set \"flipY\" to %d. Return code was: %s",
+                           vimbasrc->properties.flipy,
+                           ErrorCodeToMessage(result));
+    }    
+
+    //!CAFSIG    
+
+
     // Auto whitebalance
     enum_entry = g_enum_get_value(g_type_class_ref(GST_ENUM_BALANCEWHITEAUTO_MODES),
                                   vimbasrc->properties.balancewhiteauto);
@@ -1842,6 +1980,37 @@ VmbError_t apply_feature_settings(GstVimbaSrc *vimbasrc)
                            vimbasrc->properties.gain,
                            ErrorCodeToMessage(result));
     }
+
+    //CAFSIG
+    // gain max min values //TODO, non blocking features, set them without stopping
+    GST_DEBUG_OBJECT(vimbasrc, "Setting \"Gain automax\" to %f", vimbasrc->properties.gainautomax);
+    result = VmbFeatureFloatSet(vimbasrc->camera.handle, "GainAutoMax", vimbasrc->properties.gainautomax);
+    if (result == VmbErrorSuccess)
+    {
+        GST_DEBUG_OBJECT(vimbasrc, "Setting was changed successfully");
+    }
+    else
+    {
+        GST_WARNING_OBJECT(vimbasrc,
+                           "Failed to set \"Gain Auto Max\" to %f. Return code was: %s",
+                           vimbasrc->properties.gainautomax,
+                           ErrorCodeToMessage(result));
+    }
+    GST_DEBUG_OBJECT(vimbasrc, "Setting \"Gain automin\" to %f", vimbasrc->properties.gainautomin);
+    result = VmbFeatureFloatSet(vimbasrc->camera.handle, "GainAutoMin", vimbasrc->properties.gainautomin);
+    if (result == VmbErrorSuccess)
+    {
+        GST_DEBUG_OBJECT(vimbasrc, "Setting was changed successfully");
+    }
+    else
+    {
+        GST_WARNING_OBJECT(vimbasrc,
+                           "Failed to set \"Gain Auto Min\" to %f. Return code was: %s",
+                           vimbasrc->properties.gainautomin,
+                           ErrorCodeToMessage(result));
+    }
+    //!CAFSIG
+
 
     result = set_roi(vimbasrc);
 

@@ -22,6 +22,7 @@ add_library(${PROJECT_NAME} SHARED
     src/gstvimbasrc.c
     src/vimba_helpers.c
     src/pixelformats.c
+    src/vimba_code_to_property.c
 )
 
 # Defines used in gstplugin.c
